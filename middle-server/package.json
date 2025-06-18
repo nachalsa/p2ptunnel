@@ -1,0 +1,13 @@
+{
+  "name": "transparent-ssh-tunnel",
+  "version": "1.0.0",
+  "description": "완전 투명 SSH P2P 터널링",
+  "dependencies": {
+    "socket.io": "^4.7.2",
+    "socket.io-client": "^4.7.2"
+  },
+  "scripts": {
+    "start": "node ssh-proxy-server.js",
+    "agent": "node ssh-tunnel-agent.js"
+  }
+}
