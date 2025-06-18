@@ -1,5 +1,9 @@
 # 완전 투명 SSH P2P 터널링 시스템
 
+git clone https://github.com/nachalsa/p2ptunnel.git
+cd p2ptunnel.git
+chmod +x *.sh
+
 ## 진정한 투명성 구조
 
 ```
@@ -756,3 +760,424 @@ echo "💡 실제 접속: ssh $SSH_USER@$RELAY_IP"
 - 클라이언트: 아무것도 설치할 필요 없음
 
 이제 진짜 투명한 SSH 터널링이 완성되었습니다!
+
+
+
+# 투명 SSH 터널링 시스템 배포 및 운영 가이드
+
+## 📁 프로젝트 구조
+```
+transparent-ssh-tunnel/
+├── README.md
+├── start-middle-server.sh      # 중계 서버 시작 스크립트
+├── start-target-server.sh      # 타겟 서버 시작 스크립트
+├── monitor-system.sh           # 시스템 모니터링 스크립트
+├── test-connection.sh          # 연결 테스트 스크립트
+├── middle-server/              # 라즈베리파이 (중계 서버)
+│   ├── ssh-proxy-server.js
+│   ├── p2p-manager.js
+│   └── package.json
+└── target-server/              # 사설망 PC (타겟 서버)
+    ├── ssh-tunnel-agent.js
+    └── package.json
+```
+
+## 🚀 1단계: 프로젝트 클론 및 설정
+
+### 전체 프로젝트 설정
+```bash
+# 프로젝트 클론 (또는 수동 생성)
+git clone <your-repo> transparent-ssh-tunnel
+cd transparent-ssh-tunnel
+
+# 모든 실행 스크립트에 권한 부여
+chmod +x *.sh
+```
+
+## 📦 2단계: 의존성 설치
+
+### 중계 서버 (라즈베리파이) 설정
+```bash
+cd middle-server
+
+# package.json 확인/생성
+cat > package.json << 'EOF'
+{
+  "name": "transparent-ssh-middle-server",
+  "version": "1.0.0",
+  "description": "투명 SSH 터널링 중계 서버",
+  "main": "ssh-proxy-server.js",
+  "scripts": {
+    "start": "node ssh-proxy-server.js",
+    "dev": "nodemon ssh-proxy-server.js",
+    "status": "pm2 status ssh-middle",
+    "logs": "pm2 logs ssh-middle",
+    "stop": "pm2 stop ssh-middle",
+    "restart": "pm2 restart ssh-middle"
+  },
+  "dependencies": {
+    "socket.io": "^4.7.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
+EOF
+
+# 의존성 설치
+npm install
+
+# PM2 설치 (프로세스 관리자)
+sudo npm install -g pm2
+```
+
+### 타겟 서버 (사설망 PC) 설정
+```bash
+cd ../target-server
+
+# package.json 확인/생성
+cat > package.json << 'EOF'
+{
+  "name": "transparent-ssh-target-server",
+  "version": "1.0.0",
+  "description": "투명 SSH 터널링 타겟 서버",
+  "main": "ssh-tunnel-agent.js",
+  "scripts": {
+    "start": "node ssh-tunnel-agent.js",
+    "dev": "nodemon ssh-tunnel-agent.js",
+    "status": "pm2 status ssh-target",
+    "logs": "pm2 logs ssh-target",
+    "stop": "pm2 stop ssh-target",
+    "restart": "pm2 restart ssh-target"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.7.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
+EOF
+
+# 의존성 설치
+npm install
+sudo npm install -g pm2
+```
+
+## 🔧 3단계: 실행 스크립트 작성
+
+### 중계 서버 시작 스크립트 생성
+```bash
+# 프로젝트 루트에서 실행
+
+cat > start-middle-server.sh << 'EOF'
+#!/bin/bash
+
+echo "🚀 투명 SSH 터널링 중계 서버 시작"
+echo "================================="
+
+# 기존 SSH 서비스 중지 (포트 22 사용을 위해)
+echo "📋 기존 SSH 서비스 중지..."
+sudo systemctl stop ssh
+sudo systemctl disable ssh
+
+# 중계 서버 디렉토리로 이동
+cd "$(dirname "$0")/middle-server"
+
+# 환경 변수 설정
+export NODE_ENV=production
+export SSH_PORT=22
+export SOCKET_PORT=3000
+
+# 포트 사용 확인
+if lsof -Pi :22 -sTCP:LISTEN -t >/dev/null ; then
+    echo "❌ 포트 22가 이미 사용 중입니다."
+    echo "🔧 사용 중인 프로세스를 확인하세요: sudo lsof -i :22"
+    exit 1
+fi
+
+# PM2로 서버 시작
+echo "🔥 중계 서버 시작 중..."
+sudo pm2 start ssh-proxy-server.js \
+  --name "ssh-middle" \
+  --max-memory-restart 500M \
+  --error-action restart \
+  --watch \
+  --ignore-watch="node_modules" \
+  --log-date-format "YYYY-MM-DD HH:mm:ss" \
+  --time
+
+# 부팅 시 자동 시작 설정
+sudo pm2 startup
+sudo pm2 save
+
+echo ""
+echo "✅ 중계 서버 시작 완료!"
+echo "📊 상태 확인: pm2 status"
+echo "📋 로그 확인: pm2 logs ssh-middle"
+echo "🌐 외부 접속: ssh user@$(hostname -I | awk '{print $1}')"
+echo "🔧 포트: SSH(22), Socket(3000)"
+EOF
+
+chmod +x start-middle-server.sh
+```
+
+### 타겟 서버 시작 스크립트 생성
+```bash
+cat > start-target-server.sh << 'EOF'
+#!/bin/bash
+
+echo "🔗 투명 SSH 터널링 타겟 서버 시작"
+echo "================================="
+
+# 중계 서버 IP 확인
+if [ -z "$MIDDLE_SERVER_IP" ]; then
+    echo "❌ 중계 서버 IP를 설정해주세요:"
+    echo "   export MIDDLE_SERVER_IP=라즈베리파이IP"
+    echo "   예: export MIDDLE_SERVER_IP=192.168.1.100"
+    exit 1
+fi
+
+# 타겟 서버 디렉토리로 이동
+cd "$(dirname "$0")/target-server"
+
+# 환경 변수 설정
+export NODE_ENV=production
+export RELAY_SERVER="http://$MIDDLE_SERVER_IP:3000"
+export RELAY_SERVER_IP="$MIDDLE_SERVER_IP"
+
+echo "📍 중계 서버: $RELAY_SERVER"
+
+# SSH 서비스 확인
+if ! systemctl is-active --quiet ssh; then
+    echo "⚠️ SSH 서비스가 비활성화되어 있습니다."
+    echo "🔧 SSH 서비스 시작 중..."
+    sudo systemctl start ssh
+    sudo systemctl enable ssh
+fi
+
+# 중계 서버 연결 테스트
+echo "🔍 중계 서버 연결 테스트..."
+if ! nc -z $MIDDLE_SERVER_IP 3000 2>/dev/null; then
+    echo "❌ 중계 서버에 연결할 수 없습니다."
+    echo "🔧 중계 서버가 실행 중인지 확인하세요."
+    exit 1
+fi
+
+# PM2로 에이전트 시작
+echo "🔗 타겟 서버 에이전트 시작 중..."
+pm2 start ssh-tunnel-agent.js \
+  --name "ssh-target" \
+  --max-memory-restart 200M \
+  --error-action restart \
+  --watch \
+  --ignore-watch="node_modules" \
+  --log-date-format "YYYY-MM-DD HH:mm:ss" \
+  --time
+
+# 부팅 시 자동 시작 설정
+pm2 startup
+pm2 save
+
+echo ""
+echo "✅ 타겟 서버 에이전트 시작 완료!"
+echo "📊 상태 확인: pm2 status"
+echo "📋 로그 확인: pm2 logs ssh-target"
+echo "🎯 SSH 터널링 준비 완료!"
+EOF
+
+chmod +x start-target-server.sh
+```
+
+### 시스템 모니터링 스크립트 생성
+```bash
+cat > monitor-system.sh << 'EOF'
+#!/bin/bash
+
+echo "📊 투명 SSH 터널링 시스템 전체 상태"
+echo "===================================="
+
+# PM2 프로세스 상태
+echo "🔥 PM2 프로세스 상태:"
+pm2 status
+
+echo ""
+echo "📋 최근 로그 (각 10줄):"
+echo "----------------------"
+
+if pm2 list | grep -q ssh-middle; then
+    echo "🖥️ 중계 서버 로그:"
+    pm2 logs ssh-middle --lines 5 --nostream
+    echo ""
+fi
+
+if pm2 list | grep -q ssh-target; then
+    echo "🎯 타겟 서버 로그:"
+    pm2 logs ssh-target --lines 5 --nostream
+    echo ""
+fi
+
+echo "🌐 네트워크 연결 상태:"
+echo "---------------------"
+
+# SSH 포트 확인
+if netstat -tuln 2>/dev/null | grep -q ":22 " || ss -tuln 2>/dev/null | grep -q ":22 "; then
+    echo "✅ SSH 포트 22 활성"
+else
+    echo "❌ SSH 포트 22 비활성"
+fi
+
+# 소켓 포트 확인
+if netstat -tuln 2>/dev/null | grep -q ":3000 " || ss -tuln 2>/dev/null | grep -q ":3000 "; then
+    echo "✅ 소켓 서버 포트 3000 활성"
+else
+    echo "❌ 소켓 서버 포트 3000 비활성"
+fi
+
+echo ""
+echo "💾 시스템 리소스:"
+echo "----------------"
+if command -v free >/dev/null; then
+    echo "메모리: $(free -h | awk 'NR==2{printf "사용:%s 전체:%s (%.1f%%)", $3, $2, $3/$2*100}')"
+fi
+
+if command -v df >/dev/null; then
+    echo "디스크: $(df -h / | awk 'NR==2{print $3"/"$2" ("$5")"}')"
+fi
+
+echo ""
+echo "🔄 빠른 명령어:"
+echo "--------------"
+echo "  전체 재시작: pm2 restart all"
+echo "  전체 중지:   pm2 stop all"
+echo "  실시간 로그: pm2 logs --follow"
+echo "  프로세스 삭제: pm2 delete all"
+
+echo ""
+echo "🧪 연결 테스트:"
+echo "--------------"
+echo "  ./test-connection.sh [중계서버IP] [SSH사용자명]"
+EOF
+
+chmod +x monitor-system.sh
+```
+
+## 🏃‍♂️ 4단계: 실행하기
+
+### 1. 중계 서버 (라즈베리파이)에서 실행
+```bash
+# 프로젝트 루트에서 중계 서버 시작
+./start-middle-server.sh
+
+# 상태 확인
+./monitor-system.sh
+
+# 실시간 로그 보기
+pm2 logs ssh-middle --follow
+```
+
+### 2. 타겟 서버 (사설망 PC)에서 실행
+```bash
+# 프로젝트 루트에서 환경 변수 설정
+export MIDDLE_SERVER_IP=192.168.1.100  # 라즈베리파이 IP
+
+# 타겟 서버 시작
+./start-target-server.sh
+
+# 상태 확인
+./monitor-system.sh
+
+# 실시간 로그 보기
+pm2 logs ssh-target --follow
+```
+
+### 3. 연결 테스트
+```bash
+# 프로젝트 루트에서 기본 연결 테스트
+./test-connection.sh
+
+# 특정 서버와 사용자로 테스트
+./test-connection.sh 192.168.1.100 myuser
+
+# 실제 SSH 접속
+ssh myuser@192.168.1.100
+```
+
+## 🔄 5단계: 운영 및 관리
+
+### 빠른 상태 확인
+```bash
+# 프로젝트 루트에서 전체 시스템 상태
+./monitor-system.sh
+
+# 특정 서버 로그
+pm2 logs ssh-middle   # 중계 서버
+pm2 logs ssh-target   # 타겟 서버
+```
+
+### 문제 해결
+```bash
+# 개별 재시작
+pm2 restart ssh-middle   # 중계 서버 재시작
+pm2 restart ssh-target   # 타겟 서버 재시작
+
+# 전체 재시작
+pm2 restart all
+
+# 완전 정지 후 재시작
+pm2 stop all
+# 중계 서버에서: ./start-middle-server.sh
+# 타겟 서버에서: ./start-target-server.sh
+```
+
+### 로그 관리
+```bash
+# 로그 실시간 모니터링
+pm2 logs --follow
+
+# 로그 초기화
+pm2 flush
+
+# 상세 프로세스 정보
+pm2 describe ssh-middle
+pm2 describe ssh-target
+```
+
+## 🧪 6단계: 테스트 및 검증
+
+### 연결 테스트
+```bash
+# 프로젝트 루트에서 기본 테스트
+./test-connection.sh
+
+# 상세 테스트
+./test-connection.sh 중계서버IP SSH사용자명
+```
+
+### 방화벽 설정 (필요시)
+```bash
+# 중계 서버 (라즈베리파이)
+sudo ufw allow 22/tcp      # SSH 프록시
+sudo ufw allow 3000/tcp    # 소켓 서버
+sudo ufw enable
+
+# 타겟 서버 (사설망 PC)
+sudo ufw allow 22/tcp      # SSH 서비스
+```
+
+## 🎯 완료!
+
+새로운 구조로 시스템이 실행됩니다:
+
+1. **중계 서버 (middle-server)**: SSH 프록시 + P2P 관리
+2. **타겟 서버 (target-server)**: SSH 터널 에이전트
+3. **외부 접속**: `ssh user@중계서버IP`
+
+### 💡 유용한 팁
+
+- **디렉토리 구조 유지**: 각 서버별로 명확히 분리
+- **환경 변수 활용**: `MIDDLE_SERVER_IP` 설정 필수
+- **로그 모니터링**: `pm2 monit` 실시간 모니터링
+- **자동 복구**: 메모리/에러 시 자동 재시작
+
+이제 새로운 구조로 안정적인 투명 SSH 터널링을 운영할 수 있습니다! 🎉
