@@ -23,12 +23,17 @@ if lsof -Pi :22 -sTCP:LISTEN -t >/dev/null ; then
     exit 1
 fi
 
+if lsof -Pi :3000 -sTCP:LISTEN -t >/dev/null ; then
+	echo "❌ 포트 3000이 이미 사용 중입니다."
+	echo "🔧 사용 중인 프로세스를 확인하세요: sudo lsof -i :3000"
+	exit 1
+fi
+
 # PM2로 서버 시작
 echo "🔥 중계 서버 시작 중..."
 sudo pm2 start ssh-proxy-server.js \
   --name "ssh-middle" \
   --max-memory-restart 500M \
-  --error-action restart \
   --watch \
   --ignore-watch="node_modules" \
   --log-date-format "YYYY-MM-DD HH:mm:ss" \
@@ -36,7 +41,7 @@ sudo pm2 start ssh-proxy-server.js \
 
 # 부팅 시 자동 시작 설정
 sudo pm2 startup
-sudo pm2 save
+sudo pm2 save --force
 
 echo ""
 echo "✅ 중계 서버 시작 완료!"
