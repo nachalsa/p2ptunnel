@@ -3,10 +3,6 @@
 echo "🚀 투명 SSH 터널링 중계 서버 시작"
 echo "================================="
 
-# 기존 SSH 서비스 중지 (포트 22 사용을 위해)
-echo "📋 기존 SSH 서비스 중지..."
-sudo systemctl stop ssh
-sudo systemctl disable ssh
 
 # 중계 서버 디렉토리로 이동
 cd "$(dirname "$0")/middle-server"
@@ -16,16 +12,23 @@ export NODE_ENV=production
 export SSH_PORT=22
 export SOCKET_PORT=3000
 
+echo "🧹 기존 PM2 'ssh-middle' 프로세스 정리..."
+sudo pm2 stop ssh-middle 2>/dev/null
+sudo pm2 delete ssh-middle 2>/dev/null
+
 # 포트 사용 확인
-if lsof -Pi :22 -sTCP:LISTEN -t >/dev/null ; then
-    echo "❌ 포트 22가 이미 사용 중입니다."
-    echo "🔧 사용 중인 프로세스를 확인하세요: sudo lsof -i :22"
+if lsof -Pi :$SSH_PORT -sTCP:LISTEN -t >/dev/null ; then
+    echo "❌ 포트 $SSH_PORT가 이미 사용 중입니다."
+    echo "🔧 사용 중인 프로세스를 확인하세요: sudo lsof -i :$SSH_PORT"
+    if [ $SSH_PORT = 22 ]; then
+        echo "📋 기존 SSH 서비스를 확인하세요 /etc/ssh/sshd_config  systemctl restart ssh"
+    fi
     exit 1
 fi
 
-if lsof -Pi :3000 -sTCP:LISTEN -t >/dev/null ; then
-	echo "❌ 포트 3000이 이미 사용 중입니다."
-	echo "🔧 사용 중인 프로세스를 확인하세요: sudo lsof -i :3000"
+if lsof -Pi :$SOCKET_PORT -sTCP:LISTEN -t >/dev/null ; then
+	echo "❌ 포트 $SOCKET_PORT이 이미 사용 중입니다."
+	echo "🔧 사용 중인 프로세스를 확인하세요: sudo lsof -i :$SOCKET_PORT"
 	exit 1
 fi
 
@@ -48,5 +51,5 @@ echo "✅ 중계 서버 시작 완료!"
 echo "📊 상태 확인: pm2 status"
 echo "📋 로그 확인: pm2 logs ssh-middle"
 echo "🌐 외부 접속: ssh user@$(hostname -I | awk '{print $1}')"
-echo "🔧 포트: SSH(22), Socket(3000)"
+echo "🔧 포트: SSH($SSH_PORT), Socket($SOCKET_PORT)"
 
