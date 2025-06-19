@@ -42,7 +42,6 @@ echo "🔗 타겟 서버 에이전트 시작 중..."
 pm2 start ssh-tunnel-agent.js \
   --name "ssh-target" \
   --max-memory-restart 200M \
-  --error-action restart \
   --watch \
   --ignore-watch="node_modules" \
   --log-date-format "YYYY-MM-DD HH:mm:ss" \
